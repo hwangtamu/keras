@@ -333,7 +333,7 @@ def load_img(path, grayscale=False, target_size=None):
     return img
 
 
-def list_pictures(directory, ext='jpg|jpeg|bmp|png'):
+def list_pictures(directory, ext='jpg|jpeg|bmp|png|ppm'):
     return [os.path.join(root, f)
             for root, _, files in os.walk(directory) for f in files
             if re.match(r'([\w]+\.(?:' + ext + '))', f)]
@@ -779,12 +779,12 @@ class NumpyArrayIterator(Iterator):
                              'with shape', self.x.shape)
         channels_axis = 3 if data_format == 'channels_last' else 1
         if self.x.shape[channels_axis] not in {1, 3, 4}:
-            raise ValueError('NumpyArrayIterator is set to use the '
-                             'data format convention "' + data_format + '" '
-                             '(channels on axis ' + str(channels_axis) + '), i.e. expected '
-                             'either 1, 3 or 4 channels on axis ' + str(channels_axis) + '. '
-                             'However, it was passed an array with shape ' + str(self.x.shape) +
-                             ' (' + str(self.x.shape[channels_axis]) + ' channels).')
+            warnings.warn('NumpyArrayIterator is set to use the '
+                          'data format convention "' + data_format + '" '
+                          '(channels on axis ' + str(channels_axis) + '), i.e. expected '
+                          'either 1, 3 or 4 channels on axis ' + str(channels_axis) + '. '
+                          'However, it was passed an array with shape ' + str(self.x.shape) +
+                          ' (' + str(self.x.shape[channels_axis]) + ' channels).')
         if y is not None:
             self.y = np.asarray(y)
         else:
@@ -971,7 +971,7 @@ class DirectoryIterator(Iterator):
         self.save_prefix = save_prefix
         self.save_format = save_format
 
-        white_list_formats = {'png', 'jpg', 'jpeg', 'bmp'}
+        white_list_formats = {'png', 'jpg', 'jpeg', 'bmp', 'ppm'}
 
         # first, count the number of samples and classes
         self.samples = 0
@@ -983,9 +983,6 @@ class DirectoryIterator(Iterator):
                     classes.append(subdir)
         self.num_class = len(classes)
         self.class_indices = dict(zip(classes, range(len(classes))))
-
-        def _recursive_list(subpath):
-            return sorted(os.walk(subpath, followlinks=follow_links), key=lambda tpl: tpl[0])
 
         pool = multiprocessing.pool.ThreadPool()
         function_partial = partial(_count_valid_files_in_directory,

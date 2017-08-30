@@ -21,7 +21,7 @@ def _time_distributed_dense(x, w, b=None, dropout=None,
         x: input tensor.
         w: weight matrix.
         b: optional bias vector.
-        dropout: wether to apply dropout (same dropout mask
+        dropout: whether to apply dropout (same dropout mask
             for every temporal slice of the input).
         input_dim: integer; optional dimensionality of the input.
         output_dim: integer; optional dimensionality of the output.
@@ -252,6 +252,14 @@ class Recurrent(Layer):
         return inputs
 
     def __call__(self, inputs, initial_state=None, **kwargs):
+
+        # If there are multiple inputs, then
+        # they should be the main input and `initial_state`
+        # e.g. when loading model from file
+        if isinstance(inputs, (list, tuple)) and len(inputs) > 1 and initial_state is None:
+            initial_state = inputs[1:]
+            inputs = inputs[0]
+
         # If `initial_state` is specified,
         # and if it a Keras tensor,
         # then add it to the inputs and temporarily

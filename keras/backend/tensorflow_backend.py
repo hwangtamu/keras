@@ -192,24 +192,18 @@ def _convert_string_dtype(dtype):
     # Raises
         ValueError: if `dtype` is not supported.
     """
-    if dtype == 'float16':
-        return tf.float16
-    if dtype == 'float32':
-        return tf.float32
-    elif dtype == 'float64':
-        return tf.float64
-    elif dtype == 'int16':
-        return tf.int16
-    elif dtype == 'int32':
-        return tf.int32
-    elif dtype == 'int64':
-        return tf.int64
-    elif dtype == 'uint8':
-        return tf.int8
-    elif dtype == 'uint16':
-        return tf.uint16
-    else:
+    mapping = {'float16': tf.float16,
+               'float32': tf.float32,
+               'float64': tf.float64,
+               'int16': tf.int16,
+               'int32': tf.int32,
+               'int64': tf.int64,
+               'uint8': tf.int8,
+               'uint16': tf.uint16}
+
+    if dtype not in mapping:
         raise ValueError('Unsupported dtype:', dtype)
+    return mapping[dtype]
 
 
 def _to_tensor(x, dtype):
@@ -280,13 +274,15 @@ def to_dense(tensor):
 name_scope = tf.name_scope
 
 
-def variable(value, dtype=None, name=None):
+def variable(value, dtype=None, name=None, constraint=None):
     """Instantiates a variable and returns it.
 
     # Arguments
         value: Numpy array, initial value of the tensor.
         dtype: Tensor type.
         name: Optional name string for the tensor.
+        constraint: Optional projection function to be
+            applied to the variable after an optimizer update.
 
     # Returns
         A variable instance (with Keras metadata included).
@@ -323,6 +319,11 @@ def variable(value, dtype=None, name=None):
     elif hasattr(value, 'get_shape'):
         v._keras_shape = int_shape(value)
     v._uses_learning_phase = False
+    # TODO: move to Variable constructor when supported in public release.
+    try:
+        v.constraint = constraint
+    except AttributeError:
+        v._constraint = constraint
     return v
 
 
@@ -360,18 +361,22 @@ def constant(value, dtype=None, shape=None, name=None):
 def is_keras_tensor(x):
     """Returns whether `x` is a Keras tensor.
 
+    A "Keras tensor" is a tensor that was returned by a Keras layer,
+    (`Layer` class) or by `Input`.
+
     # Arguments
-        x: a potential tensor.
+        x: A candidate tensor.
 
     # Returns
-        A boolean: whether the argument is a Keras tensor.
+        A boolean: Whether the argument is a Keras tensor.
 
     # Raises
-        ValueError: in case `x` is not a symbolic tensor.
+        ValueError: In case `x` is not a symbolic tensor.
 
     # Examples
     ```python
         >>> from keras import backend as K
+        >>> from keras.layers import Input, Dense
         >>> np_var = numpy.array([1, 2])
         >>> K.is_keras_tensor(np_var) # A numpy array is not a symbolic tensor.
         ValueError
@@ -379,10 +384,16 @@ def is_keras_tensor(x):
         >>> K.is_keras_tensor(k_var) # A variable indirectly created outside of keras is not a Keras tensor.
         False
         >>> keras_var = K.variable(np_var)
-        >>> K.is_keras_tensor(keras_var)  # A variable created with the keras backend is a Keras tensor.
-        True
+        >>> K.is_keras_tensor(keras_var)  # A variable created with the keras backend is not a Keras tensor.
+        False
         >>> keras_placeholder = K.placeholder(shape=(2, 4, 5))
-        >>> K.is_keras_tensor(keras_placeholder)  # A placeholder is a Keras tensor.
+        >>> K.is_keras_tensor(keras_placeholder)  # A placeholder is not a Keras tensor.
+        False
+        >>> keras_input = Input([10])
+        >>> K.is_keras_tensor(keras_input) # An Input is a Keras tensor.
+        True
+        >>> keras_layer_output = Dense(10)(keras_input)
+        >>> K.is_keras_tensor(keras_layer_output) # Any Keras layer output is a Keras tensor.
         True
     ```
     """
@@ -434,6 +445,21 @@ def placeholder(shape=None, ndim=None, dtype=None, sparse=False, name=None):
     return x
 
 
+def is_placeholder(x):
+    """Returns whether `x` is a placeholder.
+
+    # Arguments
+        x: A candidate placeholder.
+
+    # Returns
+        Boolean.
+    """
+    try:
+        return x.op.type == 'Placeholder'
+    except AttributeError:
+        return False
+
+
 def shape(x):
     """Returns the symbolic shape of a tensor or variable.
 
@@ -444,7 +470,7 @@ def shape(x):
         A symbolic shape (which is itself a tensor).
 
     # Examples
-    ```
+    ```python
         # TensorFlow example
         >>> from keras import backend as K
         >>> tf_session = K.get_session()
@@ -1800,7 +1826,7 @@ def repeat_elements(x, rep, axis):
         x_rep = [s for s in splits for _ in range(rep)]
         return concatenate(x_rep, axis)
 
-    # Here we use tf.tile to mimic behaviour of np.repeat so that
+    # Here we use tf.tile to mimic behavior of np.repeat so that
     # we can handle dynamic shapes (that include None).
     # To do that, we need an auxiliary axis to repeat elements along
     # it and then merge them along the desired axis.
@@ -2127,7 +2153,7 @@ def set_value(x, value):
         value: Value to set the tensor to, as a Numpy array
             (of the same shape).
     """
-    value = np.asarray(value)
+    value = np.asarray(value, dtype=dtype(x))
     tf_dtype = _convert_string_dtype(x.dtype.name.split('_')[0])
     if hasattr(x, '_assign_placeholder'):
         assign_placeholder = x._assign_placeholder
@@ -2151,7 +2177,7 @@ def batch_set_value(tuples):
         assign_ops = []
         feed_dict = {}
         for x, value in tuples:
-            value = np.asarray(value)
+            value = np.asarray(value, dtype=dtype(x))
             tf_dtype = _convert_string_dtype(x.dtype.name.split('_')[0])
             if hasattr(x, '_assign_placeholder'):
                 assign_placeholder = x._assign_placeholder
@@ -2574,7 +2600,7 @@ def in_train_phase(x, alt, training=None):
             (tensor or callable that returns a tensor).
         training: Optional scalar tensor
             (or Python boolean, or Python integer)
-            specifing the learning phase.
+            specifying the learning phase.
 
     # Returns
         Either `x` or `alt` based on the `training` flag.
@@ -2617,7 +2643,7 @@ def in_test_phase(x, alt, training=None):
             (tensor or callable that returns a tensor).
         training: Optional scalar tensor
             (or Python boolean, or Python integer)
-            specifing the learning phase.
+            specifying the learning phase.
 
     # Returns
         Either `x` or `alt` based on `K.learning_phase`.
@@ -3579,7 +3605,7 @@ def ctc_label_dense_to_sparse(labels, label_lengths):
         label_lengths: length of the labels.
 
     # Returns
-        A sparse tensor representation of the lablels.
+        A sparse tensor representation of the labels.
     """
     label_shape = tf.shape(labels)
     num_batches_tns = tf.stack([label_shape[0]])
@@ -3746,7 +3772,7 @@ def local_conv1d(inputs, kernel, kernel_size, strides, data_format=None):
         data_format: the data format, channels_first or channels_last
 
     # Returns
-        the tensor after 1d conv with un-shared weights, with shape (batch_size, output_lenght, filters)
+        the tensor after 1d conv with un-shared weights, with shape (batch_size, output_length, filters)
 
     # Raises
         ValueError: if `data_format` is neither `channels_last` or `channels_first`.
